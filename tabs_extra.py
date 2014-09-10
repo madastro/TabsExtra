@@ -37,6 +37,9 @@ Are you sure you want to continue?
 '''
 
 
+###############################
+# Helpers
+###############################
 def log(msg, status=False):
     string = str(msg)
     print("TabsExtra: %s" % string)
@@ -149,11 +152,17 @@ def get_group_view(window, group, index):
     return view
 
 
+###############################
+# Sticky Tabs
+###############################
 class TabsExtraClearAllStickyCommand(sublime_plugin.WindowCommand):
     def run(self, group=-1, force=False):
         """
         Clear all tab sticky states of current active group.
         """
+
+        if group == -1:
+            group = self.window.active_group()
 
         if group >= 0:
             persistent = is_persistent()
@@ -166,6 +175,9 @@ class TabsExtraClearAllStickyCommand(sublime_plugin.WindowCommand):
         """
         Show command if any tabs in active group are sticky.
         """
+
+        if group == -1:
+            group = self.window.active_group()
 
         marked = False
         views = self.window.views_in_group(int(group))
@@ -201,6 +213,78 @@ class TabsExtraToggleStickyCommand(sublime_plugin.WindowCommand):
             if view is not None:
                 checked = view.settings().get("tabs_extra_sticky", False)
         return checked
+
+
+class TabsExtraSetStickyCommand(sublime_plugin.TextCommand):
+    def run(self, edit, value):
+        """ Set the sticky command to the specific value """
+
+        if self.is_enabled(value):
+            self.view.settings().set("tabs_extra_sticky", bool(value))
+
+    def is_enabled(self, value):
+        """ Check if sticky value is already set to desired value """
+
+        enabled = False
+        if self.view is not None:
+            current_value = self.view.settings().get("tabs_extra_sticky", False)
+            if current_value != value:
+                enabled = True
+        return enabled
+
+
+###############################
+# Close
+###############################
+class TabsExtraCloseMenuCommand(sublime_plugin.WindowCommand):
+    close_types = [
+        ("Close", "single"),
+        ("Close Other Tabs", "other"),
+        ("Close Tabs to Right", "right"),
+        ("Close Tabs to Left", "left"),
+        ("Close All Tabs", "all")
+    ]
+
+    def run(self, mode="normal"):
+        self.mode = mode
+        self.group = -1
+        self.index = -1
+        sheet = self.window.active_sheet()
+        if sheet is not None:
+            self.group, self.index = self.window.get_sheet_index(sheet)
+        if self.group != -1 and self.index != -1:
+            self.window.show_quick_panel(
+                [x[0] for x in self.close_types],
+                self.check_selection
+            )
+
+    def check_selection(self, value):
+        if value != -1:
+            close_unsaved = True
+            unsaved_prompt = True
+            if self.mode == "skip_unsaved":
+                close_unsaved = False
+            if self.mode == "dismiss_unsaved":
+                unsaved_prompt = False
+            close_type = self.close_types[value][1]
+            self.window.run_command(
+                "tabs_extra_close",
+                {
+                    "group": int(self.group),
+                    "index": int(self.index),
+                    "close_type": close_type,
+                    "unsaved_prompt": unsaved_prompt,
+                    "close_unsaved": close_unsaved
+                }
+            )
+
+    def is_enabled(self, mode="normal"):
+        group = -1
+        index = -1
+        sheet = self.window.active_sheet()
+        if sheet is not None:
+            group, index = self.window.get_sheet_index(sheet)
+        return group != -1 and index != -1 and mode in ["normal", "skip_unsaved", "dismiss_unsaved"]
 
 
 class TabsExtraCloseAllCommand(sublime_plugin.WindowCommand):
@@ -384,7 +468,9 @@ class TabsExtraCloseCommand(sublime_plugin.WindowCommand):
 
         TabsExtraListener.extra_command_call = False
 
-
+###############################
+# Listener
+###############################
 class TabsExtraListener(sublime_plugin.EventListener):
     extra_command_call = False
 
@@ -570,6 +656,9 @@ class TabsExtraListener(sublime_plugin.EventListener):
         return selected
 
 
+###############################
+# Wrappers
+###############################
 class TabsExtraViewWrapperCommand(sublime_plugin.WindowCommand):
     def run(self, command, group=-1, index=-1, args={}):
         """
@@ -583,6 +672,9 @@ class TabsExtraViewWrapperCommand(sublime_plugin.WindowCommand):
                 self.window.run_command(command, args)
 
 
+###############################
+# File Management Commands
+###############################
 class TabsExtraDeleteCommand(sublime_plugin.WindowCommand):
     def run(self, group=-1, index=-1):
         """
@@ -607,56 +699,6 @@ class TabsExtraDeleteCommand(sublime_plugin.WindowCommand):
             if view is not None and view.file_name() is not None and exists(view.file_name()):
                 enabled = True
         return enabled
-
-
-class TabsExtraSortCommand(sublime_plugin.WindowCommand):
-    def run(self, group=-1, sort_by=None, reverse=False):
-        """
-        Sort Tabs
-        """
-
-        if sort_by is not None:
-            self.group = group
-            self.reverse = reverse
-            views = self.window.views_in_group(int(group))
-            if len(views):
-                sort_module = self.get_sort_module(sort_by)
-                if sort_module is not None:
-                    view_data = []
-                    sort_module.run(views, view_data)
-                    self.sort(view_data)
-
-    def sort(self, view_data):
-        """
-        Sort the views
-        """
-
-        indexes = tuple([x for x in range(0, len(view_data[0]) - 1)])
-        sorted_views = sorted(view_data, key=itemgetter(*indexes))
-        if self.reverse:
-            sorted_views = sorted_views[::-1]
-        for index in range(0, len(sorted_views)):
-            self.window.set_view_index(sorted_views[index][-1], self.group, index)
-
-    def get_sort_module(self, module_name):
-        """
-        Import the sort_by module
-        """
-
-        import imp
-        path_name = join("Packages", normpath(module_name.replace('.', '/')))
-        path_name += ".py"
-        module = imp.new_module(module_name)
-        sys.modules[module_name] = module
-        exec(
-            compile(
-                sublime.load_resource(sublime_format_path(path_name)),
-                module_name, 'exec'
-            ),
-            sys.modules[module_name].__dict__
-        )
-        return module
-
 
 class TabsExtraRenameCommand(sublime_plugin.WindowCommand):
     def run(self, group=-1, index=-1):
@@ -728,6 +770,87 @@ class TabsExtraFileCommand(TabsExtraViewWrapperCommand):
         return enabled
 
 
+###############################
+# Sort
+###############################
+class TabsExtraSortMenuCommand(sublime_plugin.WindowCommand):
+    def run(self):
+        """ Using "sort_layout" setting, construct a quick panel sort menu """
+        sort_layout = sublime.load_settings(SETTINGS).get("sort_layout", [])
+        if len(sort_layout):
+            self.sort_commands = []
+            sort_menu = []
+            for sort_entry in sort_layout:
+                caption = str(sort_entry.get("caption", ""))
+                module = str(sort_entry.get("module", ""))
+                reverse = bool(sort_entry.get("reverse", False))
+                if module != "":
+                    self.sort_commands.append((module, reverse))
+                    sort_menu.append(caption)
+            if len(sort_menu):
+                self.window.show_quick_panel(sort_menu, self.check_selection)
+
+    def check_selection(self, value):
+        """ Launch the selected sort command """
+        if value != -1:
+            command = self.sort_commands[value]
+            self.window.run_command("tabs_extra_sort", {"sort_by": command[0], "reverse": command[1]})
+
+
+class TabsExtraSortCommand(sublime_plugin.WindowCommand):
+    def run(self, group=-1, sort_by=None, reverse=False):
+        """
+        Sort Tabs
+        """
+
+        if sort_by is not None:
+            if group == -1:
+                group = self.window.active_group()
+            self.group = group
+            self.reverse = reverse
+            views = self.window.views_in_group(int(group))
+            if len(views):
+                sort_module = self.get_sort_module(sort_by)
+                if sort_module is not None:
+                    view_data = []
+                    sort_module.run(views, view_data)
+                    self.sort(view_data)
+
+    def sort(self, view_data):
+        """
+        Sort the views
+        """
+
+        indexes = tuple([x for x in range(0, len(view_data[0]) - 1)])
+        sorted_views = sorted(view_data, key=itemgetter(*indexes))
+        if self.reverse:
+            sorted_views = sorted_views[::-1]
+        for index in range(0, len(sorted_views)):
+            self.window.set_view_index(sorted_views[index][-1], self.group, index)
+
+    def get_sort_module(self, module_name):
+        """
+        Import the sort_by module
+        """
+
+        import imp
+        path_name = join("Packages", normpath(module_name.replace('.', '/')))
+        path_name += ".py"
+        module = imp.new_module(module_name)
+        sys.modules[module_name] = module
+        exec(
+            compile(
+                sublime.load_resource(sublime_format_path(path_name)),
+                module_name, 'exec'
+            ),
+            sys.modules[module_name].__dict__
+        )
+        return module
+
+
+###############################
+# Menu Installation
+###############################
 class TabsExtraInstallOverrideMenuCommand(sublime_plugin.ApplicationCommand):
     def run(self):
         """
@@ -759,6 +882,9 @@ class TabsExtraInstallMenuCommand(sublime_plugin.ApplicationCommand):
         tab_menu.upgrade_default_menu()
 
 
+###############################
+# Plugin Loading
+###############################
 def plugin_loaded():
     win = sublime.active_window()
     if win is not None:
