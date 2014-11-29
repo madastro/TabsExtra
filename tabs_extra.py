@@ -250,7 +250,7 @@ class TabsExtraCloseMenuCommand(sublime_plugin.WindowCommand):
         ("Close All Tabs", "all")
     ]
 
-    def run(self, mode="normal"):
+    def run(self, mode="normal", close_type=None):
         self.mode = mode
         self.group = -1
         self.index = -1
@@ -258,10 +258,20 @@ class TabsExtraCloseMenuCommand(sublime_plugin.WindowCommand):
         if sheet is not None:
             self.group, self.index = self.window.get_sheet_index(sheet)
         if self.group != -1 and self.index != -1:
-            self.window.show_quick_panel(
-                [x[0] for x in self.close_types],
-                self.check_selection
-            )
+            value = None
+            if close_type is not None:
+                index = 0
+                for ct in self.close_types:
+                    if ct[1] == close_type:
+                        value = index
+                    index += 1
+            if value is None:
+                self.window.show_quick_panel(
+                    [x[0] for x in self.close_types],
+                    self.check_selection
+                )
+            else:
+                self.check_selection(value)
 
     def check_selection(self, value):
         if value != -1:
@@ -521,6 +531,7 @@ class TabsExtraListener(sublime_plugin.EventListener):
         if sort_on_save():
             if not self.on_sort(view):
                 view.settings().set('tabsextra_to_sort', True)
+        view.window().focus_view(view)
 
     def on_post_save(self, view):
         if sort_on_save():
@@ -558,9 +569,15 @@ class TabsExtraListener(sublime_plugin.EventListener):
         focus the correct view in window group.
         """
 
+        window = view.window()
+        if window is not None:
+            # On close window shouldn't have a view
+            # This is possibly a preview
+            window.focus_view(view)
+            return
+
         view_info = view.settings().get("tabs_extra_view_info", None)
         window_info = view.settings().get("tabs_extra_window_info", None)
-        window = None
         if view_info is not None and window_info is not None:
             for w in sublime.windows():
                 if w.id() == window_info:
@@ -599,6 +616,7 @@ class TabsExtraListener(sublime_plugin.EventListener):
         elif sort_on_save() and view.settings().get('tabsextra_to_sort'):
             view.settings().erase('tabsextra_to_sort')
             self.on_sort(view)
+        view.window().focus_view(view)
 
     def on_move(self, view, win_id, group_id, last_index):
         """
