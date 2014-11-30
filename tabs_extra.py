@@ -489,6 +489,7 @@ class TabsExtraCloseCommand(sublime_plugin.WindowCommand):
 ###############################
 class TabsExtraListener(sublime_plugin.EventListener):
     extra_command_call = False
+    group_capture = None
 
     def on_window_command(self, window, command_name, args):
         """
@@ -525,13 +526,17 @@ class TabsExtraListener(sublime_plugin.EventListener):
             command_name = "tabs_extra_close"
             args["close_type"] = "right"
             cmd = (command_name, args)
+        elif command_name == "set_layout":
+            TabsExtraListener.group_capture = (window.id(), window.num_groups())
         return cmd
 
     def on_load(self, view):
         if sort_on_save():
             if not self.on_sort(view):
                 view.settings().set('tabsextra_to_sort', True)
-        view.window().focus_view(view)
+        window = view.window()
+        if window is not None:
+            window.focus_view(view)
 
     def on_post_save(self, view):
         if sort_on_save():
@@ -568,11 +573,20 @@ class TabsExtraListener(sublime_plugin.EventListener):
         If close command was initiated outside of TabsExtra,
         focus the correct view in window group.
         """
-
         window = view.window()
         if window is not None:
             # On close window shouldn't have a view
             # This is possibly a preview
+            win_id, group_num = window.id(), window.num_groups()
+            if TabsExtraListener.group_capture is not None:
+                # If you are closing a group, don't try and focus
+                # The closing view(s)
+                if (
+                    win_id == TabsExtraListener.group_capture[0] and
+                    group_num < TabsExtraListener.group_capture[1]
+                ):
+                    TabsExtraListener.group_capture = None
+                    return
             window.focus_view(view)
             return
 
@@ -616,7 +630,9 @@ class TabsExtraListener(sublime_plugin.EventListener):
         elif sort_on_save() and view.settings().get('tabsextra_to_sort'):
             view.settings().erase('tabsextra_to_sort')
             self.on_sort(view)
-        view.window().focus_view(view)
+        window = view.window()
+        if window is not None:
+            window.focus_view(view)
 
     def on_move(self, view, win_id, group_id, last_index):
         """
